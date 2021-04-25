@@ -1,4 +1,4 @@
-# lfs
+# lfs (local_file_send)
 
 `lfs` is a small proof of concept to make file exchange on a local network as simple as possible.
 The only thing necessary is to pass on a few keywords and the transfer will happen automatically, in a somewhat secure way, between two device on the same network.
