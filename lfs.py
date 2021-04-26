@@ -68,7 +68,7 @@ class LFS:
         return [bytes(word, "ascii") for word in random.sample(WORD_LIST, count)]
 
     @staticmethod
-    def get_addresses(iface=None) -> List[bytes]:
+    def get_addresses(iface: str = None) -> List[bytes]:
         addresses = set()
         ifaces = [iface]
         if iface is None:
