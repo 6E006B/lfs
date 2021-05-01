@@ -4,6 +4,7 @@ import sys
 from Crypto.Random import get_random_bytes
 from Crypto.Cipher import AES
 from Crypto.Protocol.KDF import scrypt
+import math
 import netifaces
 import os
 import random
@@ -44,7 +45,7 @@ def display_keyword_matches(self, substitution, matches, longest_match_length):
 
 
 class LFS:
-    BUFFER_SIZE = 4096
+    BUFFER_SIZE = 2**22
     DEFAULT_PORT = 12345
     TYPE_POSTFIX = "_lfs._tcp.local."
     VERSION = "0.1"
@@ -111,9 +112,9 @@ class LFS:
 
     def init_encrypted_send(self, conn: socket.socket, size: int):
         salt, cipher = self.get_cipher()
-        conn.send(salt)
-        conn.send(cipher.nonce)
-        conn.send(struct.pack("Q", size))
+        conn.sendall(salt)
+        conn.sendall(cipher.nonce)
+        conn.sendall(struct.pack("Q", size))
         return cipher
 
     def init_encrypted_recv(self, conn: socket.socket):
@@ -125,20 +126,22 @@ class LFS:
         return cipher, size
 
     def send_data(self, conn: socket.socket, data: bytes):
-        cipher = self.init_encrypted_send(conn, len(data))
-        encrypted_data = cipher.encrypt(data)
-        conn.send(encrypted_data)
+        data_len = len(data)
+        cipher = self.init_encrypted_send(conn, data_len)
+        for i in range(math.ceil(data_len / self.BUFFER_SIZE)):
+            encrypted_data = cipher.encrypt(data[i*self.BUFFER_SIZE:(i+1)*self.BUFFER_SIZE])
+            conn.sendall(encrypted_data)
         tag = cipher.digest()
-        conn.send(tag)
+        conn.sendall(tag)
 
     def recv_data(self, conn):
         data = b""
         cipher, size = self.init_encrypted_recv(conn)
-        for _ in range(int(size / self.BUFFER_SIZE)):
-            encrypted_data = conn.recv(self.BUFFER_SIZE)
+        received_size = 0
+        while received_size < size:
+            encrypted_data = conn.recv(min(self.BUFFER_SIZE, size - received_size))
+            received_size += len(encrypted_data)
             data += cipher.decrypt(encrypted_data)
-        encrypted_data = conn.recv(int(size % self.BUFFER_SIZE))
-        data += cipher.decrypt(encrypted_data)
         if len(data) != size:
             raise ConnectionError(f"Error: Received incomplete data ({len(data)}, but expected {size})")
         tag = conn.recv(16)
@@ -169,46 +172,68 @@ class LFS:
         decision = self.recv_data(conn)
         return decision == b"y"
 
-    def send_file(self, conn: socket.socket, file: str):
+    def send_success(self, conn: socket.socket, success: bool):
+        self.send_data(conn, b"y" if success else b"n")
+
+    def recv_success(self, conn: socket.socket) -> bool:
+        return self.recv_data(conn) == b"y"
+
+    def send_file(self, conn: socket.socket, file: str) -> bool:
         with open(file, "rb") as fh:
             self.send_data(conn, fh.read())
+        return self.recv_success(conn)
 
     def recv_file(self, sock: socket.socket, filename: str):
+        success = True
         try:
             with open(filename, "wb") as fh:
                 fh.write(self.recv_data(sock))
         except Exception as e:
             print("[ ] Error: Failure on file transmission")
-            sock.close()
             os.remove(filename)
+            success = False
             raise e
+        finally:
+            try:
+                self.send_success(sock, success)
+            except Exception as e:
+                print("[ ] Error: Failed to send transmissions success state:", e)
+            finally:
+                sock.close()
 
     def handle_client(self, conn: socket.socket, file: str):
         self.send_filename(conn, file)
         decision = self.recv_decision(conn)
         if decision:
             print("[*] Transmitting file")
-            self.send_file(conn, file)
-            print("[*] File successfully sent")
+            if self.send_file(conn, file):
+                print("[*] File successfully sent")
+            else:
+                print("[ ] Error in transferred file, please try again.")
         else:
             print("[ ] Transfer aborted by recipient")
 
     def serve_file(self, file: str):
         # TODO: support explicit IPv6
         listen_address = ("", self.port)
-        if socket.has_dualstack_ipv6():
+        if getattr(socket, 'has_dualstack_ipv6', None) is not None and socket.has_dualstack_ipv6():
             sock = socket.create_server(listen_address, family=socket.AF_INET6, reuse_port=True, dualstack_ipv6=True)
-        else:
+        elif getattr(socket, 'create_server', None) is not None:
             sock = socket.create_server(listen_address, reuse_port=True)
+        else:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(listen_address)
+            sock.listen()
         try:
             conn, addr = sock.accept()
             print("[*] Connection from", addr)
-            try:
-                self.handle_client(conn, file)
-            finally:
-                conn.close()
+            # try:
+            self.handle_client(conn, file)
+            # finally:
+                # conn.close()
         finally:
-            sock.shutdown(socket.SHUT_RDWR)
+            # sock.shutdown(socket.SHUT_RDWR)
             sock.close()
 
     def get_file(self, filename: str = None, ask: bool = False):
@@ -223,7 +248,7 @@ class LFS:
                         if self.iface:
                             ip += f"%{self.iface}"
                         else:
-                            raise ConnectionError(f"Cannot connect to link-local IPv6 ({ip}) without explicit --interface.")
+                            raise ConnectionRefusedError(f"Cannot connect to link-local IPv6 ({ip}) without explicit --interface.")
                     print("connecting to", (ip, port))
                     with socket.create_connection((ip, port)) as sock:
                         name = self.recv_filename(sock)
@@ -242,6 +267,11 @@ class LFS:
                         break
                 except ConnectionRefusedError as e:
                     print(f"[ ] Error reaching '{ip}:{port}':", e)
+                except OSError as e:
+                    if e.errno == 101:
+                        print(f"[ ] Error reaching '{ip}:{port}':", e)
+                    else:
+                        raise e
 
     def __del__(self):
         self.renounce()
