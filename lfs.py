@@ -164,7 +164,7 @@ class LFS:
     @staticmethod
     def ask_decision(name: bytes) -> bool:
         print(f"[*] File offered: '{name.decode('ascii')}'")
-        print("Continue? (Y/n):", end="", flush=True)
+        print("Continue? (Y/n): ", end="", flush=True)
         response = sys.stdin.read(1)
         return  response in ("y", "Y", "\n")
 
@@ -251,11 +251,16 @@ class LFS:
                             raise ConnectionRefusedError(f"Cannot connect to link-local IPv6 ({ip}) without explicit --interface.")
                     print("connecting to", (ip, port))
                     with socket.create_connection((ip, port)) as sock:
+                        decision = True
                         name = self.recv_filename(sock)
                         if filename is None:
                             # TODO: check for unwanted chars in name
                             filename = os.path.basename(name)
-                        decision = True if not ask else self.ask_decision(name)
+                            if os.path.exists(filename):
+                                print(f"[*] File '{filename.decode('ascii')}' already exists.")
+                                print("Overwrite? (Y/n): ", end="", flush=True)
+                                decision = sys.stdin.read(1) in ("y", "Y", "\n")
+                        decision = decision if not decision or not ask else self.ask_decision(name)
                         if decision:
                             self.send_data(sock, b"y")
                             print("[*] Starting file transfer")
