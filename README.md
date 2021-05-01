@@ -57,3 +57,7 @@ The script is written in python and the requirements can be installed via:
 ```shell
 pip install -r requirements.txt
 ```
+
+# Note:
+
+For a client to use the IPv6 link-local address of the server, it needs to specify the interface explicitly, otherwise announced link-local addresses will be skipped.
