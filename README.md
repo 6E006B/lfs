@@ -32,7 +32,7 @@ Please enter the magic keywords: watermark-rattles-troll-inch
 
 Customization options:
 ```
-usage: lfs.py [-h] [-a] [-i INTERFACE] [-k KEYWORDS] [-o OUTFILE] [-p PORT] [file]
+usage: lfs.py [-h] [-a] [-c KEYWORD_COUNT] [-i INTERFACE] [-k KEYWORDS] [-o OUTFILE] [-p PORT] [file]
 
 positional arguments:
   file                  File to be transferred. Receiving mode if omitted.
@@ -40,7 +40,7 @@ positional arguments:
 optional arguments:
   -h, --help            show this help message and exit
   -a, --ask             Ask before accepting file transfer.
-    -c KEYWORD_COUNT, --keyword-count KEYWORD_COUNT
+  -c KEYWORD_COUNT, --keyword-count KEYWORD_COUNT
                         Number of keywords to use, if automatically generated (default: 4).
   -i INTERFACE, --interface INTERFACE
                         Interface to use for file transfer (only used for file serving and IPv6).
