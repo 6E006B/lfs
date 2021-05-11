@@ -322,7 +322,7 @@ class LFS:
                             ip += f"%{self.iface}"
                         else:
                             raise ConnectionRefusedError(f"Cannot connect to link-local IPv6 ({ip}) without explicit --interface.")
-                    print("connecting to", (ip, port))
+                    # print("connecting to", (ip, port))
                     with socket.create_connection((ip, port)) as sock:
                         decision = True
                         name = self.recv_filename(sock)
