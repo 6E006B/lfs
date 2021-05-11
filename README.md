@@ -12,7 +12,7 @@ To identify the correct serving host, a SHA224 hash, based on the provided keywo
 The data exchange is done in an encrypted fashion.
 The keywords are based on BIP-0039 (https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki).
 The underlying entropy is then used as password with PBKDF2, plus a randomly generated salt, which will be passed on before transmission.
-The result is used to generated a `AES-256` key, which will be used in `GCM` for communication between the peers.
+The result is used to generate a `AES-256` key, which will be used in `GCM` for communication between the peers.
 
 The exchange format is:
 ```
