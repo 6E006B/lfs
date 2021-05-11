@@ -58,7 +58,7 @@ class LFS:
         self.iface: str = iface
         self.port: int = port
         self.transferred: bool = False
-        self.keywords = keywords if keywords is not None else self._generate_keywords(strength)
+        self.keywords = Mnemonic.normalize_string(keywords if keywords is not None else self._generate_keywords(strength))
 
     def get_cipher(self, salt=None, nonce=None):
         salt = salt if salt is not None else get_random_bytes(32)
@@ -70,9 +70,9 @@ class LFS:
         return salt, cipher
 
     @staticmethod
-    def _generate_keywords(strength: int, language: str = "english") -> str:
+    def _generate_keywords(strength: int) -> str:
         assert strength > 0
-        mnemo = Mnemonic(language=language)
+        mnemo = Mnemonic(language="english")
         entropy = os.urandom(strength*4)
         h = hashlib.sha256(entropy).hexdigest()
         b = (
@@ -158,7 +158,7 @@ class LFS:
         desc = {'version': self.VERSION}
         addresses = self.get_addresses(self.iface)
         # sha224 is chosen here, because 256 bit is too long for a type name
-        announce_prefix = hashlib.sha224(self.keywords.encode("utf-8")).hexdigest()
+        announce_prefix = hashlib.sha224(self._get_entropy_for_keywords(self.keywords)).hexdigest()
         self.service_info = ServiceInfo(
             self.TYPE_POSTFIX,
             f"{announce_prefix}.{self.TYPE_POSTFIX}",
@@ -169,8 +169,9 @@ class LFS:
         # print("[*] Announcing", self.service_info)
 
     def discover(self):
-        prefix = hashlib.sha224(self.keywords.encode("utf-8")).hexdigest()
-        info = self.zconf.get_service_info(self.TYPE_POSTFIX, f"{prefix}.{self.TYPE_POSTFIX}")
+        prefix = hashlib.sha224(self._get_entropy_for_keywords(self.keywords)).hexdigest()
+        type_string = f"{prefix}.{self.TYPE_POSTFIX}"
+        info = self.zconf.get_service_info(self.TYPE_POSTFIX, type_string)
         if info is None:
             return None, None
         else:
