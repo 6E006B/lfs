@@ -7,24 +7,44 @@ The only thing necessary is to pass on a few keywords and the transfer will happ
 
 Discovery of the host, serving the file, is done via zeroconf.
 The service type is `_lfs._tcp.local.`.
-To identify the correct serving host, the first keyword is used, resulting in a service name of `<first-keyword>._lfs._tcp.local.`.
+To identify the correct serving host, a SHA224 hash, based on the provided keywords, is used as part of the service name: `<hash>._lfs._tcp.local.`.
 
 The data exchange is done in an encrypted fashion.
-The remaining keywords are fed into `scrypt` and the result, in combination with a random 32 byte salt and 16 byte nonce, generates a `AES-256` key, which will be used in `GCM` for communication between the peers.
+The keywords are based on BIP-0039 (https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki).
+The underlying entropy is then used as password with PBKDF2, plus a randomly generated salt, which will be passed on before transmission.
+The result is used to generated a `AES-256` key, which will be used in `GCM` for communication between the peers.
+
+The exchange format is:
+```
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                             salt                              |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|             nonce             |    length     |               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+               |
+|                                                               |
+|                         encrypted data                        |
+|                                                               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+```
+**salt**: Byte sequence used for PBKDF2 key derivation.\
+**nonce**: Byte sequence used for AES-256 key generation.\
+**length**: Payload length of encrypted data.
 
 ## Usage
 
 Send a file:
 ```shell
 $ python lfs.py <file-to-send>
-[*] Share keywords: watermark-rattles-troll-inch
+[*] Share keywords: leg stage viable
 [...]
 ```
 
 Receive the file:
 ```shell
 $ python lfs.py
-Please enter the magic keywords: watermark-rattles-troll-inch
+Please enter the magic keywords: leg stage viable
 [*] Starting file transfer
 [*] File successfully received
 [❤] Thanks for using LFS
@@ -32,7 +52,7 @@ Please enter the magic keywords: watermark-rattles-troll-inch
 
 Customization options:
 ```
-usage: lfs.py [-h] [-a] [-c KEYWORD_COUNT] [-i INTERFACE] [-k KEYWORDS] [-o OUTFILE] [-p PORT] [file]
+usage: lfs.py [-h] [-a] [-s STRENGTH] [-i INTERFACE] [-k KEYWORDS] [-o OUTFILE] [-p PORT] [file]
 
 positional arguments:
   file                  File to be transferred. Receiving mode if omitted.
@@ -40,12 +60,14 @@ positional arguments:
 optional arguments:
   -h, --help            show this help message and exit
   -a, --ask             Ask before accepting file transfer.
-  -c KEYWORD_COUNT, --keyword-count KEYWORD_COUNT
-                        Number of keywords to use, if automatically generated (default: 4).
+  -s STRENGTH, --strength STRENGTH
+                        Amount of entropy to use for key derivation. Results in strength×3 key
+                        words (default: 1).
   -i INTERFACE, --interface INTERFACE
                         Interface to use for file transfer (only used for file serving and IPv6).
   -k KEYWORDS, --keywords KEYWORDS
-                        Keywords to use for exchange, delimited with '-'. At least two keywords are required.
+                        Keywords to use for exchange, delimited with '-' or space. (Multiples of 3
+                        and need to conform to BIP039.)
   -o OUTFILE, --outfile OUTFILE
                         File received data should be stored in (default: served file name).
   -p PORT, --port PORT  Port to listen on (only used for file serving) (default: 12345).
