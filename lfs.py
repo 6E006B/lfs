@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
-import sys
 
-from Crypto.Cipher import AES
-from Crypto.Hash import HMAC, SHA256
-from Crypto.Random import get_random_bytes
-from Crypto.Protocol.KDF import PBKDF2
+import base64
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 import hashlib
 import itertools
-import math
 from mnemonic.mnemonic import binary_search, Mnemonic
 import netifaces
 import os
 import re
-import readline
+# import readline
 import socket
 import struct
+import sys
 from typing import List
 from zeroconf import IPVersion, ServiceInfo, Zeroconf
 
@@ -47,8 +46,11 @@ from zeroconf import IPVersion, ServiceInfo, Zeroconf
 
 
 class LFS:
+
     BUFFER_SIZE = 2**22
     DEFAULT_PORT = 12345
+    SALT_SIZE = 16
+    SIZE_SIZE = 8
     TYPE_POSTFIX = "_lfs._tcp.local."
     VERSION = "0.1"
 
@@ -60,13 +62,12 @@ class LFS:
         self.transferred: bool = False
         self.keywords = Mnemonic.normalize_string(keywords if keywords is not None else self._generate_keywords(strength))
 
-    def get_cipher(self, salt=None, nonce=None):
-        salt = salt if salt is not None else get_random_bytes(32)
-        # use SHA256 instead of the default SHA1
-        prf_hmac_sha256 = lambda p, s: HMAC.new(p, s, SHA256).digest()
+    def get_cipher(self, salt: bytes = None):
         entropy = self._get_entropy_for_keywords(self.keywords)
-        key = PBKDF2(entropy, salt, 32, prf=prf_hmac_sha256)
-        cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+        salt = salt if salt else os.urandom(self.SALT_SIZE)
+        kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000)
+        key = base64.urlsafe_b64encode(kdf.derive(entropy))
+        cipher = Fernet(key)
         return salt, cipher
 
     @staticmethod
@@ -183,48 +184,23 @@ class LFS:
             self.service_info = None
             # print("[*] Unregistered announcement")
 
-    def init_encrypted_send(self, conn: socket.socket, size: int):
-        salt, cipher = self.get_cipher()
-        conn.sendall(salt)
-        conn.sendall(cipher.nonce)
-        conn.sendall(struct.pack("Q", size))
-        return cipher
-
-    def init_encrypted_recv(self, conn: socket.socket):
-        salt = conn.recv(32)
-        nonce = conn.recv(16)
-        size = struct.unpack("Q", conn.recv(8))[0]
-        # print(f"salt: {salt} | nonce: {nonce} | size: {size}")
-        _, cipher = self.get_cipher(salt=salt, nonce=nonce)
-        return cipher, size
-
     def send_data(self, conn: socket.socket, data: bytes):
-        data_len = len(data)
-        cipher = self.init_encrypted_send(conn, data_len)
-        for i in range(math.ceil(data_len / self.BUFFER_SIZE)):
-            encrypted_data = cipher.encrypt(data[i*self.BUFFER_SIZE:(i+1)*self.BUFFER_SIZE])
-            conn.sendall(encrypted_data)
-        tag = cipher.digest()
-        conn.sendall(tag)
+        salt, cipher = self.get_cipher()
+        encrypted_data = cipher.encrypt(data)
+        conn.sendall(salt)
+        conn.sendall(struct.pack("Q", len(encrypted_data)))
+        conn.sendall(encrypted_data)
 
     def recv_data(self, conn):
-        data = b""
-        cipher, size = self.init_encrypted_recv(conn)
-        received_size = 0
-        while received_size < size:
-            encrypted_data = conn.recv(min(self.BUFFER_SIZE, size - received_size))
-            received_size += len(encrypted_data)
-            data += cipher.decrypt(encrypted_data)
-        if len(data) != size:
-            raise ConnectionError(f"Error: Received incomplete data ({len(data)}, but expected {size})")
-        tag = conn.recv(16)
-        try:
-            cipher.verify(tag)
-        except ValueError as e:
-            print("[ ] Error during decryption")
-            conn.close()
-            raise e
-        return data
+        salt = conn.recv(self.SALT_SIZE)
+        size = struct.unpack("Q", conn.recv(self.SIZE_SIZE))[0]
+        _, cipher = self.get_cipher(salt=salt)
+        encrypted_data = b""
+        while len(encrypted_data) < size:
+            encrypted_data += conn.recv(min(self.BUFFER_SIZE, size - len(encrypted_data)))
+        if len(encrypted_data) != size:
+            raise ConnectionError(f"Error: Received incomplete data ({len(encrypted_data)}, but expected {size})")
+        return cipher.decrypt(encrypted_data)
 
     def send_filename(self, conn: socket.socket, file: str):
         filename = os.path.basename(file)

@@ -1,4 +1,4 @@
+cryptography
 mnemonic
 netifaces
-pycryptodome
 zeroconf
