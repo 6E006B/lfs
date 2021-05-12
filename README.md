@@ -12,16 +12,16 @@ To identify the correct serving host, a SHA224 hash, based on the provided keywo
 The data exchange is done in an encrypted fashion.
 The keywords are based on BIP-0039 (https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki).
 The underlying entropy is then used as password with PBKDF2, plus a randomly generated salt, which will be passed on before transmission.
-The result is used to generate a `AES-256` key, which will be used in `GCM` for communication between the peers.
+The encryption is based on the `Fernet` (https://github.com/fernet/spec/blob/master/Spec.md) implementation from the `cryptography` python library (https://github.com/pyca/cryptography).
+`Fernet` is based on AES in CBC mode with a 128-bit key for encryption, using PKCS7 padding and 
+HMAC using SHA256 for authentication.
 
 The exchange format is:
 ```
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                             salt                              |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|             nonce             |    length     |               |
+|             salt              |    length     |               |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+               |
 |                                                               |
 |                         encrypted data                        |
@@ -29,7 +29,6 @@ The exchange format is:
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ```
 **salt**: Byte sequence used for PBKDF2 key derivation.\
-**nonce**: Byte sequence used for AES-256 key generation.\
 **length**: Payload length of encrypted data.
 
 ## Usage
