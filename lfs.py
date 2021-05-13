@@ -61,6 +61,7 @@ class LFS:
         self.port: int = port
         self.transferred: bool = False
         self.keywords = Mnemonic.normalize_string(keywords if keywords is not None else self._generate_keywords(strength))
+        self.cipher = None
 
     def get_cipher(self, salt: bytes = None):
         entropy = self._get_entropy_for_keywords(self.keywords)
@@ -185,22 +186,28 @@ class LFS:
             # print("[*] Unregistered announcement")
 
     def send_data(self, conn: socket.socket, data: bytes):
-        salt, cipher = self.get_cipher()
-        encrypted_data = cipher.encrypt(data)
-        conn.sendall(salt)
+        assert self.cipher is not None
+        encrypted_data = self.cipher.encrypt(data)
         conn.sendall(struct.pack("Q", len(encrypted_data)))
         conn.sendall(encrypted_data)
 
-    def recv_data(self, conn):
-        salt = conn.recv(self.SALT_SIZE)
+    def recv_data(self, conn: socket.socket):
+        assert self.cipher is not None
         size = struct.unpack("Q", conn.recv(self.SIZE_SIZE))[0]
-        _, cipher = self.get_cipher(salt=salt)
         encrypted_data = b""
         while len(encrypted_data) < size:
             encrypted_data += conn.recv(min(self.BUFFER_SIZE, size - len(encrypted_data)))
         if len(encrypted_data) != size:
             raise ConnectionError(f"Error: Received incomplete data ({len(encrypted_data)}, but expected {size})")
-        return cipher.decrypt(encrypted_data)
+        return self.cipher.decrypt(encrypted_data)
+
+    def send_init_crypto(self, conn: socket.socket):
+        salt, self.cipher = self.get_cipher()
+        conn.sendall(salt)
+
+    def recv_init_crypto(self, conn: socket.socket):
+        salt = conn.recv(self.SALT_SIZE)
+        _, self.cipher = self.get_cipher(salt=salt)
 
     def send_filename(self, conn: socket.socket, file: str):
         filename = os.path.basename(file)
@@ -251,6 +258,7 @@ class LFS:
                 sock.close()
 
     def handle_client(self, conn: socket.socket, file: str):
+        self.send_init_crypto(conn)
         self.send_filename(conn, file)
         decision = self.recv_decision(conn)
         if decision:
@@ -301,6 +309,7 @@ class LFS:
                     # print("connecting to", (ip, port))
                     with socket.create_connection((ip, port)) as sock:
                         decision = True
+                        self.recv_init_crypto(sock)
                         name = self.recv_filename(sock)
                         if filename is None:
                             # TODO: check for unwanted chars in name
